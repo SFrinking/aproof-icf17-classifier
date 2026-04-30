@@ -48,17 +48,10 @@ def start_worker_process(
     runtime_config: dict,
     log_level: str,
 ) -> tuple[mp.Process, mp.Queue, mp.Queue]:
-    #LLM: The heavy models are loaded in a dedicated worker subprocess.
-    #LLM: This lets the parent enforce a real timeout by terminating the worker
-    #LLM: if a chunk hangs, while still keeping models loaded once during normal operation.
+    #Worker subprocessed to better handle faulty inputs.
     task_queue = ctx.Queue(maxsize=2)
     result_queue = ctx.Queue(maxsize=2)
 
-    # process = ctx.Process(
-    #     target=worker_main,
-    #     args=(task_queue, result_queue, runtime_config, log_level),
-    #     daemon=True,
-    # )
     process = ctx.Process(
         target=worker_main,
         args=(task_queue, result_queue, runtime_config, log_level),
@@ -382,8 +375,7 @@ def main(
                 )
 
                 if snapshot_every_n_chunks > 0 and completed_chunks_this_run % snapshot_every_n_chunks == 0:
-                    #LLM: The assembled CSV is periodically rebuilt from completed chunk files.
-                    #LLM: That keeps a readable output on disk without making it the source of truth.
+                    #write output file each X chunks (sysarg)
                     log.info("Refreshing assembled output snapshot.")
                     assemble_output_from_chunks(
                         checkpoint_dir=checkpoint_root,
@@ -429,8 +421,7 @@ def main(
             if traceback_text:
                 log.error("Traceback for chunk %s:\n%s", chunk_number, traceback_text)
 
-            #LLM: On timeout or worker death, we fully restart the worker so the next chunk
-            #LLM: gets a fresh process and a fresh CUDA state.
+            #on timeout or crash, continue with next chunk
             stop_worker_process(worker_process, task_queue, result_queue)
             worker_process, task_queue, result_queue = start_worker_process(
                 ctx=ctx,
