@@ -89,16 +89,61 @@ To run the pipeline on your own data (i.e. a csv file on your local machine), yo
 
 **CRITICAL**: You must include `--shm-size=1g` (or more) when running the docker container. The script uses multiprocessing and passes large chunks of data between processes via shared memory. The default Docker shared memory limit (64MB) will cause the container to crash with a `Bus error`. To use GPU acceleration, also add `--gpus all`.
 
-In addition, you need to pass the following arguments:
-- `--in_csv`: path to the input csv file inside the container
-- `--text_col`: name of the text column in the csv
-- `--sep`: separator character that separates the columns in the csv
-- `--encoding` (optional): use if input csv is not utf-8
-
 For example, if your csv file is in `C:\Users\User\Desktop`, it is called `myfile.csv` and the text is in the column `note` where columns are separated with ";" you need to run the following command:
 ```bash
 docker run --gpus all --shm-size=1g -v C:\Users\User\Desktop:/data piekvossen/a-proof-icf17-classifier --in_csv /data/myfile.csv --text_col note --sep ';'
 ```
+
+## All Parameters
+
+All arguments are passed directly after the image name in the `docker run` command. Below is a full overview of all available parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--in_csv` | `./example/input.csv` | Path to the input CSV file (inside the container). |
+| `--text_col` | `text` | Name of the column containing the clinical notes. |
+| `--encoding` | `utf-8` | File encoding of the input CSV. |
+| `--sep` | `;` | Column separator of the input CSV. |
+| `--out_csv` | *(next to input)* | Path to write the output CSV. Defaults to `<input_name>_output.csv` in the same directory as the input. |
+| `--out_sep` | *(same as `--sep`)* | Column separator for the output CSV. |
+| `--chunk_size` | `1000` | Number of rows processed per chunk. Reduce if you run into memory issues. |
+| `--prediction_batch_size` | `32` | Batch size for transformer model inference. Reduce if GPU memory is insufficient. |
+| `--spacy_batch_size` | `128` | Batch size for spaCy sentence splitting. |
+| `--spacy_n_process` | `1` | Number of parallel spaCy processes. Keep at `1` inside Docker. |
+| `--cuda_device` | `0` | GPU device index to use. Ignored if no GPU is available. |
+| `--domain_token` | `True` | Whether to prepend a domain token before level prediction (recommended). |
+| `--resume` | `False` | Resume a previously interrupted run using saved checkpoints. See section below. |
+| `--checkpoint_dir` | *(next to output)* | Directory where chunk checkpoints and the manifest are stored. |
+| `--snapshot_every_n_chunks` | `5` | Write a partial assembled output file every N completed chunks. |
+| `--stop_on_chunk_error` | `False` | Stop the entire run if a single chunk fails. By default, failed chunks are skipped and retried on `--resume`. |
+| `--chunk_timeout_seconds` | `0` (disabled) | Kill and skip a chunk if it takes longer than this many seconds. |
+| `--worker_startup_timeout_seconds` | `1800` | Maximum time (in seconds) to wait for the worker process to load models on startup. |
+| `--progress_every` | `250` | Log a progress message every N sentences during spaCy preprocessing. |
+| `--log_level` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+
+## Resuming interrupted runs
+
+The pipeline saves a checkpoint after each successfully processed chunk. If a run is interrupted (e.g. the container is stopped, the server reboots, or a chunk times out), you can resume exactly where it left off.
+
+**For this to work with Docker, you must mount the checkpoint directory to a folder on the host machine**, so that the checkpoints survive when the container stops. The simplest way is to mount your data directory and let the script create the checkpoint folder there automatically:
+
+```bash
+# First run
+docker run --gpus all --shm-size=1g \
+  -v /your/data:/data \
+  piekvossen/a-proof-icf17-classifier \
+  --in_csv /data/myfile.csv --text_col note --sep ';'
+
+# If it gets interrupted, resume with the exact same command + --resume
+docker run --gpus all --shm-size=1g \
+  -v /your/data:/data \
+  piekvossen/a-proof-icf17-classifier \
+  --in_csv /data/myfile.csv --text_col note --sep ';' --resume
+```
+
+The checkpoint folder (`myfile_output__checkpoints/`) will be created automatically inside `/your/data` on your host machine. On `--resume`, the script reads the manifest from that folder and skips all chunks that were already completed, then picks up from the first unprocessed chunk.
+
+> **Note**: If you do not mount a volume, the checkpoint folder will be created inside the container and will be lost when the container exits. Always use `-v` when you want resumable runs.
 
 # Cached models
 Because the models are now pre-downloaded and baked into the Docker image itself, you no longer need to mount a local cache directory or specify `TRANSFORMERS_OFFLINE=1`. The container works completely offline by default.
@@ -106,7 +151,7 @@ Because the models are now pre-downloaded and baked into the Docker image itself
 # Runtime and File Size
 The code runs faster if GPU is available on your machine; it is used automatically if it's available, no need to configure anything.
 
-On some machines, you might run into issues when generating domains predictions (this function is applied to each sentence in the input file). If this is the case, split the input into smaller batches.
+On some machines, you might run into memory issues when generating predictions. In this case, reduce `--chunk_size` and/or `--prediction_batch_size`.
 
 # License:
 
