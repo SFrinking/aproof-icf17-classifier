@@ -4,3 +4,6 @@ spacy==3.8.4
 torch==2.2.2
 simpletransformers==0.70.1
 hf_xet==1.4.3
+transformers==4.47.1
+tokenizers==0.21.4
+
