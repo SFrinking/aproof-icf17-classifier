@@ -75,35 +75,33 @@ The pipeline includes the following steps:
 ```bash
 docker pull piekvossen/a-proof-icf17-classifier
 ```
-3. Run the docker on the [example/input.csv](example/input.csv) file (it is already in the docker image and is given as the default argument to the [main_row_by_row.py](main_row_by_row.py) script):
+3. Run the docker on the [example/input.csv](example/input.csv) file (it is already in the docker image and is given as the default argument to the [main.py](main.py) script):
 ```bash
-docker run piekvossen/a-proof-icf17-classifier
+docker run --shm-size=1g piekvossen/a-proof-icf17-classifier
 ```
-This will download all the required models from [https://huggingface.co/CLTL](https://huggingface.co/CLTL) and store them in the Docker's `.cache`, so that in subsequent runs cached models can be used. In total, two transformers models are downloaded, each around 500MB.
+> **Note**: The models are pre-cached inside the Docker image, so it is fully ready to run offline without downloading models at runtime.
+
+To save the docker container, use:
+`docker save piekvossen/a-proof-icf17-classifier > aproof_image.tar`
 
 ## Step 2: Running the pipeline on your data
-To run the pipeline on your own data (i.e. a csv file on your local machine), you need to mount the local directory where the file is stored to the docker container. This is done with the `-v` flag and then `<local_dir>:<docker_dir>`. In addition, you need to pass the following arguments:
-- `--in_csv`: path to the input csv file
+To run the pipeline on your own data (i.e. a csv file on your local machine), you need to mount the local directory where the file is stored to the docker container. This is done with the `-v` flag and then `<local_dir>:<docker_dir>`. 
+
+**CRITICAL**: You must include `--shm-size=1g` (or more) when running the docker container. The script uses multiprocessing and passes large chunks of data between processes via shared memory. The default Docker shared memory limit (64MB) will cause the container to crash with a `Bus error`. To use GPU acceleration, also add `--gpus all`.
+
+In addition, you need to pass the following arguments:
+- `--in_csv`: path to the input csv file inside the container
 - `--text_col`: name of the text column in the csv
 - `--sep`: separator character that separates the columns in the csv
 - `--encoding` (optional): use if input csv is not utf-8
 
-For example, if your csv file is in `C:\Users\User\Desktop`, it is called `myfile.csv` and the text is in the column `note` where columns are seprated with ";" you need to run the following command:
+For example, if your csv file is in `C:\Users\User\Desktop`, it is called `myfile.csv` and the text is in the column `note` where columns are separated with ";" you need to run the following command:
 ```bash
-docker run -v C:\Users\User\Desktop:/root piekvossen/a-proof-icf-classifier --in_csv /root/myfile.csv --text_col note --sep ';'
+docker run --gpus all --shm-size=1g -v C:\Users\User\Desktop:/data piekvossen/a-proof-icf17-classifier --in_csv /data/myfile.csv --text_col note --sep ';'
 ```
 
 # Cached models
-To save the cached models on the local file system, or use them in a different container in a follow-up run, mount the Huggingface cache dir to a local directory. For example:
-```bash
-docker run -v <local_path_to_cache>:/root/.cache/huggingface/transformers/ piekvossen/a-proof-icf-classifier --in_csv example/input.csv --text_col text --sep ';'
-```
-
-To use the cached models in an environment without internet connection, set `TRANSFORMERS_OFFLINE=1` as environment variable (see [Huggingface documentation](https://huggingface.co/transformers/installation.html#offline-mode)). For example:
-
-```bash
-docker run -v <local_path_to_cache>:/root/.cache/huggingface/transformers/ -e TRANSFORMERS_OFFLINE=1 piekvossen/a-proof-icf-classifier --in_csv example/input.csv --text_col text --sep ';'
-```
+Because the models are now pre-downloaded and baked into the Docker image itself, you no longer need to mount a local cache directory or specify `TRANSFORMERS_OFFLINE=1`. The container works completely offline by default.
 
 # Runtime and File Size
 The code runs faster if GPU is available on your machine; it is used automatically if it's available, no need to configure anything.
